@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snakass: The Game</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: #222;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            margin: 0;
+            padding: 20px;
+            user-select: none; /* Щоб текст не виділявся при грі */
+        }
+
+        h1 {
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #2ecc71;
+            text-shadow: 2px 2px #000;
+        }
+
+        .score-board {
+            font-size: 24px;
+            margin-bottom: 15px;
+            color: #f1c40f;
+            font-weight: bold;
+        }
+
+        /* Стилі для канвасу */
+        canvas {
+            border: 4px solid #555;
+            background-color: #000; /* Колір, поки не завантажиться фон */
+            background-size: cover; /* Фон розтягується на все поле */
+            background-position: center;
+            box-shadow: 0 0 30px rgba(0,0,0,0.7);
+            image-rendering: pixelated; /* Щоб піксельні теми були чіткими */
+        }
+
+        .controls {
+            margin-top: 20px;
+            background: #333;
+            padding: 15px 25px;
+            border-radius: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #444;
+        }
+
+        label {
+            font-size: 16px;
+            color: #ccc;
+        }
+
+        select {
+            padding: 8px;
+            font-size: 16px;
+            border-radius: 5px;
+            border: none;
+            background: #fff;
+            cursor: pointer;
+            outline: none;
+        }
+
+        button {
+            padding: 8px 20px;
+            font-size: 16px;
+            background-color: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background-color: #c0392b;
+        }
+
+        .hint {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #777;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Snakass 🐍</h1>
+    <div class="score-board">Рахунок: <span id="scoreVal">0</span></div>
+    
+    <canvas id="gameCanvas" width="400" height="400"></canvas>
+
+    <div class="controls">
+        <label for="themeSelector">Обери тему:</label>
+        <select id="themeSelector">
+            </select>
+        <button onclick="resetGame()">Рестарт</button>
+    </div>
+    <div class="hint">Керування: Стрілки на клавіатурі</div>
+
+<script>
+// ==========================================
+// НАЛАШТУВАННЯ ТЕМ (РЕДАГУВАТИ ТУТ)
+// ==========================================
+const availableThemes = [
+    // ext: 'jpg' або 'png'. Якщо не вказано - за замовчуванням 'jpg'
+    { id: 'standard', name: 'Стандартна (JPG)', ext: 'jpg' },
+    { id: 'pixel',    name: 'Pixel Art (PNG)',  ext: 'png' },
+    { id: 'dark',     name: 'Dark Mode',        ext: 'jpg' }
+];
+
+// ==========================================
+// ЛОГІКА ГРИ
+// ==========================================
+
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const scoreEl = document.getElementById("scoreVal");
+const themeSelector = document.getElementById('themeSelector');
+
+const gridSize = 20; 
+const tileCount = canvas.width / gridSize;
+
+let score = 0;
+let dx = 0; dy = 0;
+let snake = [];
+let food = {x: 5, y: 5};
+let gameInterval;
+
+// Об'єкти для картинок
+const assets = {
+    head: new Image(),
+    body: new Image(),
+    food: new Image()
+};
+
+// --- 1. ІНІЦІАЛІЗАЦІЯ СПИСКУ ТЕМ ---
+availableThemes.forEach(theme => {
+    const option = document.createElement('option');
+    option.value = theme.id;
+    option.innerText = theme.name;
+    themeSelector.appendChild(option);
+});
+
+// --- 2. ФУНКЦІЯ ЗАВАНТАЖЕННЯ ТЕМИ ---
+function loadTheme(themeId) {
+    const themeConf = availableThemes.find(t => t.id === themeId);
+    if (!themeConf) return;
+
+    const ext = themeConf.ext || 'jpg'; // За замовчуванням jpg
+    const path = `./themes/${themeId}/`;
+
+    // Встановлюємо фон через CSS
+    canvas.style.backgroundImage = `url('${path}bg.${ext}')`;
+
+    // Встановлюємо шляхи до картинок
+    assets.head.src = `${path}head.${ext}`;
+    assets.body.src = `${path}body.${ext}`;
+    assets.food.src = `${path}food.${ext}`;
+
+    // Знімаємо фокус з селектора, щоб стрілки керували змійкою, а не списком
+    themeSelector.blur();
+    canvas.focus();
+}
+
+// Слухач зміни теми
+themeSelector.addEventListener('change', (e) => {
+    loadTheme(e.target.value);
+});
+
+// --- 3. ІГРОВИЙ ЦИКЛ ---
+function startGame() {
+    snake = [{x: 10, y: 10}, {x: 9, y: 10}, {x: 8, y: 10}];
+    dx = 1; dy = 0; // Починаємо рух вправо
+    score = 0;
+    scoreEl.innerText = score;
+    createFood();
+    
+    if (gameInterval) clearInterval(gameInterval);
+    gameInterval = setInterval(gameLoop, 100); // Швидкість гри (100мс)
+}
+
+function gameLoop() {
+    if (didGameEnd()) {
+        alert("Гру закінчено! Твій рахунок: " + score);
+        startGame();
+        return;
+    }
+
+    clearCanvas();
+    drawFood();
+    moveSnake();
+    drawSnake();
+}
+
+function clearCanvas() {
+    // Очищаємо полотно, роблячи його прозорим, щоб було видно bg.jpg
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawSnake() {
+    snake.forEach((part, index) => {
+        const isHead = index === 0;
+        const img = isHead ? assets.head : assets.body;
+        
+        // Малюємо картинку, якщо вона завантажена
+        if (img.complete && img.naturalHeight !== 0) {
+            ctx.drawImage(img, part.x * gridSize, part.y * gridSize, gridSize, gridSize);
+        } else {
+            // Фолбек (запасний варіант): просто кольорові квадрати
+            ctx.fillStyle = isHead ? '#2ecc71' : '#27ae60';
+            ctx.fillRect(part.x * gridSize, part.y * gridSize, gridSize - 2, gridSize - 2);
+            
+            // Малюємо очі для квадратної змії
+            if (isHead) {
+                ctx.fillStyle = 'black';
+                ctx.fillRect(part.x*gridSize+4, part.y*gridSize+4, 4, 4);
+                ctx.fillRect(part.x*gridSize+12, part.y*gridSize+4, 4, 4);
+            }
+        }
+    });
+}
+
+function drawFood() {
+    if (assets.food.complete && assets.food.naturalHeight !== 0) {
+        ctx.drawImage(assets.food, food.x * gridSize, food.y * gridSize, gridSize, gridSize);
+    } else {
+        // Фолбек для їжі
+        ctx.fillStyle = '#e74c3c';
+        ctx.fillRect(food.x * gridSize, food.y * gridSize, gridSize - 2, gridSize - 2);
+    }
+}
+
+function moveSnake() {
+    const head = {x: snake[0].x + dx, y: snake[0].y + dy};
+    snake.unshift(head);
+
+    if (head.x === food.x && head.y === food.y) {
+        score++;
+        scoreEl.innerText = score;
+        createFood();
+    } else {
+        snake.pop();
+    }
+}
+
+function createFood() {
+    food.x = Math.floor(Math.random() * tileCount);
+    food.y = Math.floor(Math.random() * tileCount);
+    
+    // Перевірка, щоб їжа не спавнилась на тілі
+    snake.forEach(part => {
+        if (part.x === food.x && part.y === food.y) createFood();
+    });
+}
+
+function didGameEnd() {
+    // Вкус себе
+    for (let i = 4; i < snake.length; i++) {
+        if (snake[i].x === snake[0].x && snake[i].y === snake[0].y) return true;
+    }
+    // Стіни
+    const hitLeft = snake[0].x < 0;
+    const hitRight = snake[0].x >= tileCount;
+    const hitTop = snake[0].y < 0;
+    const hitBottom = snake[0].y >= tileCount;
+    
+    return hitLeft || hitRight || hitTop || hitBottom;
+}
+
+function resetGame() {
+    startGame();
+    themeSelector.blur();
+}
+
+// Керування клавіатурою
+document.addEventListener("keydown", changeDirection);
+
+function changeDirection(event) {
+    const LEFT = 37, RIGHT = 39, UP = 38, DOWN = 40;
+    const key = event.keyCode;
+
+    // Блокуємо скрол сторінки при грі
+    if([37, 38, 39, 40].indexOf(key) > -1) {
+        event.preventDefault();
+    }
+
+    if (key === LEFT && dx !== 1) { dx = -1; dy = 0; }
+    if (key === UP && dy !== 1) { dx = 0; dy = -1; }
+    if (key === RIGHT && dx !== -1) { dx = 1; dy = 0; }
+    if (key === DOWN && dy !== -1) { dx = 0; dy = 1; }
+}
+
+// Старт
+loadTheme(availableThemes[0].id); // Завантажити першу тему
+startGame();
+
+</script>
+</body>
+</html>
